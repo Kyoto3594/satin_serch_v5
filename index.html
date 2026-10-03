@@ -1,47 +1,174 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>サテンブラウス画像検索 v7</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>サテンブラウス画像検索 v8</title>
 <style>
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;background:#f5f5f7;color:#111}main{max-width:760px;margin:auto;padding:16px}h1{font-size:23px}.ver{background:#111;color:#fff;padding:4px 9px;border-radius:8px;font-size:13px}.card{background:#fff;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #0001}button{font-size:16px;border:0;border-radius:12px;padding:12px 16px;background:#007aff;color:#fff;margin:5px 4px 5px 0}button:disabled{opacity:.45}.secondary{background:#e9e9ed;color:#111}input{font-size:16px}input[type=file],input[type=range]{width:100%}.muted{font-size:13px;color:#666;line-height:1.5}#status{white-space:pre-wrap;line-height:1.55}.err{color:#b42318}.ok{color:#16803c}.mono{font:12px ui-monospace,SFMono-Regular,monospace;word-break:break-word;white-space:pre-wrap}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.item{background:#fafafa;border-radius:12px;overflow:hidden}.item img{width:100%;aspect-ratio:1;object-fit:cover}.item p{margin:7px;font-size:13px}progress{width:100%;height:14px}
-</style></head><body><main>
-<h1>サテンブラウス画像検索 <span class="ver">v7</span></h1>
-<p class="muted"><b>v7・iPhone安定動作版</b>　まずCPU/WASM + fp32でAIモデルの起動を確認します。WebGPUは使いません。</p>
-<div class="card"><b>① 写真を選択</b><input id="files" type="file" accept="image/*" multiple><p class="muted">最初は1枚だけ選択してください。</p></div>
-<div class="card"><b>② 判定条件</b><p>サテンらしさ：<b id="tv">20%</b>以上</p><input id="th" type="range" min="5" max="80" value="20"><br><button id="run">解析する</button><button id="clear" class="secondary">クリア</button></div>
-<div class="card"><b>③ AIモデル</b><button id="test">AIモデルを起動</button><div id="status">v7：AIモデル未起動</div><progress id="pg" value="0" max="100"></progress></div>
-<div class="card"><b>④ 結果</b><div id="res" class="grid"></div></div>
-<div class="card"><b>⑤ 診断情報</b><div id="diag" class="mono">未実行</div></div>
+body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;margin:0;background:#f5f5f7;color:#222}
+main{max-width:760px;margin:auto;padding:20px}
+h1{font-size:24px;margin:0 0 6px}
+.ver{display:inline-block;padding:4px 9px;border-radius:999px;background:#111;color:#fff;font-size:13px}
+.card{background:white;border-radius:16px;padding:16px;margin-top:14px;box-shadow:0 2px 12px #00000012}
+button{font-size:16px;padding:12px 16px;border:0;border-radius:12px;background:#111;color:#fff;margin:6px 4px 6px 0}
+button:disabled{opacity:.45}
+input[type=file]{width:100%;font-size:16px}
+#status{white-space:pre-wrap;line-height:1.5}
+#diag{white-space:pre-wrap;word-break:break-all;font-size:12px;background:#f0f0f0;padding:10px;border-radius:10px}
+img{max-width:100%;border-radius:10px}
+.small{font-size:13px;color:#666}
+</style>
+</head>
+<body>
+<main>
+<h1>サテンブラウス画像検索 <span class="ver">v8</span></h1>
+<div class="small">MobileCLIP公式の読み込み方法を使用。iPhoneではWASM・1スレッドで実行します。</div>
+
+<div class="card">
+<button id="load">AIモデルを起動</button>
+<div id="status">待機中</div>
+</div>
+
+<div class="card">
+<input id="files" type="file" accept="image/*" multiple disabled>
+<button id="analyze" disabled>写真を解析</button>
+<div class="small">まずAIモデルを起動してください。最初は写真1枚で確認してください。</div>
+<div id="results"></div>
+</div>
+
+<div class="card">
+<b>診断情報</b>
+<div id="diag">まだありません</div>
+</div>
 </main>
+
 <script type="module">
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/+esm';
-env.allowLocalModels=false; env.useBrowserCache=true;
-const MODEL='Xenova/mobileclip_s0';
-const LABELS=['a person wearing a satin blouse','a person wearing a non-satin blouse','a person not wearing a blouse'];
-const $=id=>document.getElementById(id);let pipe=null,files=[];
-$('th').oninput=()=>{$('tv').textContent=$('th').value+'%'};
-$('files').onchange=e=>{files=[...e.target.files];$('res').innerHTML='';$('status').textContent=`v7：${files.length}枚選択しました。`;};
-function diag(x){$('diag').textContent=x} function status(x,c=''){$('status').textContent=x;$('status').className=c}
-function detail(e){return e?.stack||e?.message||String(e)}
-async function load(){
- if(pipe)return pipe;
- $('pg').value=0;
- status('v7：AIモデルを読み込んでいます。\n初回はモデルのダウンロードがあります。');
- diag('Transformers.js: 4.3.0\nモデル: Xenova/mobileclip_s0\n実行方式: CPU / WASM\nWebGPU: 使用しません');
- try{
-  pipe=await pipeline('zero-shot-image-classification',MODEL,{device:'wasm',dtype:'fp32',progress_callback:p=>{
-   if(p&&typeof p.progress==='number')$('pg').value=Math.max(0,Math.min(100,p.progress));
-   if(p&&p.status)status(`v7：${p.status}${p.file?`\n${p.file}`:''}`);
-  }});
-  diag('AIモデル起動成功\nTransformers.js: 4.3.0\nモデル: Xenova/mobileclip_s0\n実行方式: CPU / WASM / fp32\n量子化: 使用しません（MobileCLIP-S0のVisionモデル構成に合わせています）');
-  status('v7：AIモデルの起動に成功しました。','ok');
-  return pipe;
- }catch(e){pipe=null;diag('AIモデル起動失敗\n\n'+detail(e));status('v7：AIモデルを起動できませんでした。\n⑤診断情報に詳細を表示しています。','err');throw e}
+import {
+  env,
+  AutoTokenizer,
+  CLIPTextModelWithProjection,
+  AutoProcessor,
+  CLIPVisionModelWithProjection,
+  RawImage,
+  dot,
+  softmax
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/+esm";
+
+env.allowLocalModels = false;
+env.useBrowserCache = true;
+// iPhone Safariでは並列WASMスレッドを使わず、メモリ負荷を抑える
+if (env.backends?.onnx?.wasm) {
+  env.backends.onnx.wasm.numThreads = 1;
+  env.backends.onnx.wasm.proxy = false;
 }
-async function imageBlob(file){const img=await createImageBitmap(file);const max=640,s=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*s));c.height=Math.max(1,Math.round(img.height*s));c.getContext('2d',{alpha:false}).drawImage(img,0,0,c.width,c.height);img.close();return await new Promise((ok,no)=>c.toBlob(b=>b?ok(b):no(new Error('画像変換失敗')),'image/jpeg',.82));}
-async function classify(p,file){const b=await imageBlob(file),u=URL.createObjectURL(b);try{return await p(u,{candidate_labels:LABELS});}finally{URL.revokeObjectURL(u)}}
-$('test').onclick=async()=>{ $('test').disabled=true;$('run').disabled=true;try{await load()}catch{}finally{$('test').disabled=false;$('run').disabled=false}};
-$('run').onclick=async()=>{if(!files.length){alert('写真を1枚選択してください。');return}$('run').disabled=true;$('test').disabled=true;$('res').innerHTML='';try{const p=await load(),all=[];for(let i=0;i<files.length;i++){status(`v7：画像 ${i+1}/${files.length} を解析中…`);const r=await classify(p,files[i]);const score=r.find(x=>x.label===LABELS[0])?.score||0;all.push({file:files[i],score});$('pg').value=(i+1)/files.length*100}all.sort((a,b)=>b.score-a.score);const th=+$('th').value/100,hits=all.filter(x=>x.score>=th);status(`v7：解析完了。${all.length}枚中 ${hits.length}枚が候補です。`,'ok');for(const x of hits){const d=document.createElement('div');d.className='item';d.innerHTML=`<img src="${URL.createObjectURL(x.file)}"><p><b>${Math.round(x.score*100)}%</b><br>${x.file.name}</p>`;$('res').appendChild(d)}}catch(e){}finally{$('run').disabled=false;$('test').disabled=false}};
-$('clear').onclick=()=>{files=[];$('files').value='';$('res').innerHTML='';$('pg').value=0;status('v7：クリアしました。');diag('未実行')};
-</script></body></html>
+
+const MODEL = "Xenova/mobileclip_s0";
+const statusEl = document.getElementById("status");
+const diagEl = document.getElementById("diag");
+const loadBtn = document.getElementById("load");
+const filesEl = document.getElementById("files");
+const analyzeBtn = document.getElementById("analyze");
+const resultsEl = document.getElementById("results");
+
+let tokenizer, textModel, processor, visionModel, textEmbeds;
+let ready = false;
+
+function status(s){ statusEl.textContent=s; }
+function diag(s){ diagEl.textContent=s; }
+
+async function start() {
+  loadBtn.disabled = true;
+  status("AIモデルを読み込んでいます…（初回は数十MBのダウンロードがあります）");
+  diag("開始: " + new Date().toISOString());
+
+  try {
+    // MobileCLIP公式READMEと同じ構成。
+    // 特にVision modelは量子化せず、quantized:falseを明示する。
+    tokenizer = await AutoTokenizer.from_pretrained(MODEL);
+    status("1/4 テキストモデルを準備中…");
+
+    textModel = await CLIPTextModelWithProjection.from_pretrained(MODEL, {
+      device: "wasm"
+    });
+    status("2/4 画像プロセッサを準備中…");
+
+    processor = await AutoProcessor.from_pretrained(MODEL);
+    status("3/4 Visionモデルを準備中…");
+
+    visionModel = await CLIPVisionModelWithProjection.from_pretrained(MODEL, {
+      device: "wasm",
+      quantized: false
+    });
+    status("4/4 検索語を準備中…");
+
+    const labels = [
+      "a person wearing a satin blouse",
+      "a person wearing a shiny satin shirt or blouse",
+      "a person wearing a regular cotton blouse",
+      "a person not wearing a blouse"
+    ];
+    const textInputs = tokenizer(labels, {padding:"max_length", truncation:true});
+    const out = await textModel(textInputs);
+    textEmbeds = out.text_embeds.normalize();
+
+    ready = true;
+    filesEl.disabled = false;
+    analyzeBtn.disabled = false;
+    status("AIモデルの起動に成功しました。写真を1枚選んで解析できます。");
+    diag("SUCCESS: MobileCLIP-S0 / official component loading / WASM / vision quantized:false");
+  } catch (e) {
+    ready = false;
+    loadBtn.disabled = false;
+    status("AIモデルを起動できませんでした。");
+    diag("ERROR TYPE: " + (e?.name || "unknown") + "\nMESSAGE: " + (e?.message || String(e)) +
+         "\nSTACK:\n" + (e?.stack || "(なし)"));
+  }
+}
+
+async function analyze() {
+  if (!ready) return;
+  const files = [...filesEl.files];
+  if (!files.length) { status("写真を1枚選択してください。"); return; }
+
+  analyzeBtn.disabled = true;
+  resultsEl.innerHTML = "";
+  const labels = [
+    "a person wearing a satin blouse",
+    "a person wearing a shiny satin shirt or blouse",
+    "a person wearing a regular cotton blouse",
+    "a person not wearing a blouse"
+  ];
+
+  try {
+    for (let i=0;i<files.length;i++) {
+      status(`解析中 ${i+1}/${files.length} …`);
+      const url = URL.createObjectURL(files[i]);
+      try {
+        const image = await RawImage.read(url);
+        const inputs = await processor(image);
+        const {image_embeds} = await visionModel(inputs);
+        const normalized = image_embeds.normalize();
+        const probs = softmax(normalized.tolist()[0].map((_,j)=>100*dot(normalized.tolist()[0], textEmbeds.tolist()[j])));
+        const arr = labels.map((label,j)=>({label,score:probs[j]})).sort((a,b)=>b.score-a.score);
+        const div=document.createElement("div");
+        div.className="card";
+        div.innerHTML="<b>"+(i+1)+"枚目</b><br>"+arr.map(x=>`${x.label}: ${(x.score*100).toFixed(1)}%`).join("<br>");
+        resultsEl.appendChild(div);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+    status("解析完了");
+  } catch(e) {
+    status("解析中にエラーが発生しました。");
+    diag("ANALYSIS ERROR: "+(e?.name||"unknown")+"\nMESSAGE: "+(e?.message||String(e))+"\nSTACK:\n"+(e?.stack||"(なし)"));
+  } finally {
+    analyzeBtn.disabled = false;
+  }
+}
+
+loadBtn.addEventListener("click", start);
+analyzeBtn.addEventListener("click", analyze);
+</script>
+</body>
+</html>
