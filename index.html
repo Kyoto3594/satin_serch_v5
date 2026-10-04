@@ -2,102 +2,232 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>サテンブラウス画像検索 v9</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>サテンブラウス画像検索 v10</title>
 <style>
+*{box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f5f5f7;color:#111827}
-main{max-width:760px;margin:auto;padding:18px}.card{background:#fff;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #0001}
+main{max-width:760px;margin:auto;padding:18px}
+.card{background:#fff;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 2px 10px #0001}
 h1{font-size:22px;margin:0 0 4px}.ver{font-size:13px;color:#666}
 button{font-size:16px;padding:12px 16px;border:0;border-radius:10px;background:#111827;color:#fff;margin:6px 4px 6px 0}
-button:disabled{opacity:.45}input[type=file]{font-size:16px;width:100%}input[type=range]{width:100%}
-#status{white-space:pre-wrap;line-height:1.5}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.item{background:#fff;border-radius:12px;padding:8px}.item img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:8px}
-.score{font-weight:700;margin-top:5px}.small{font-size:13px;color:#666}
+button:disabled{opacity:.45}
+input[type=file]{font-size:16px;width:100%;margin:8px 0 4px}
+input[type=range]{width:100%}
+#status{white-space:pre-wrap;line-height:1.5}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.item{background:#fff;border-radius:12px;padding:8px;overflow:hidden}
+.item img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:8px}
+.score{font-weight:700;margin-top:5px}.small{font-size:13px;color:#666;line-height:1.4}
 </style>
 </head>
 <body>
 <main>
-<div class="card"><h1>サテンブラウス画像検索 <span class="ver">v9</span></h1>
-<div class="small">iPhone Safari / MobileCLIP-S0 / Transformers.js 4.3.0</div></div>
+<div class="card">
+<h1>サテンブラウス画像検索 <span class="ver">v10</span></h1>
+<div class="small">iPhone Safari / MobileCLIP-S0 / Transformers.js 4.3.0</div>
+</div>
+
 <div class="card">
 <input id="files" type="file" accept="image/*" multiple>
-<div><button id="start">① AIモデルを起動</button><button id="analyze" disabled>② 写真を解析</button></div>
+<div>
+<button id="start">① AIモデルを起動</button>
+<button id="analyze" disabled>② 写真を解析</button>
+</div>
 <label>判定しきい値：<span id="thresholdValue">55</span>%</label>
 <input id="threshold" type="range" min="35" max="80" value="55">
 </div>
+
 <div class="card"><div id="status">まだAIモデルを起動していません。</div></div>
 <div id="results" class="grid"></div>
+
 <script type="module">
-import {AutoTokenizer,CLIPTextModelWithProjection,AutoProcessor,CLIPVisionModelWithProjection,RawImage,dot,softmax}
-from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/+esm";
+import {
+  AutoTokenizer,
+  CLIPTextModelWithProjection,
+  AutoProcessor,
+  CLIPVisionModelWithProjection,
+  RawImage,
+  dot,
+  softmax
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/+esm";
 
-const MODEL="Xenova/mobileclip_s0";
-const labels=[
-"a person wearing a satin blouse",
-"a person wearing a shiny satin shirt or blouse",
-"a person wearing a regular cotton blouse",
-"a person not wearing a blouse"
+const MODEL = "Xenova/mobileclip_s0";
+
+const labels = [
+  "a person wearing a satin blouse",
+  "a person wearing a shiny satin shirt or blouse",
+  "a person wearing a regular cotton blouse",
+  "a person not wearing a blouse"
 ];
-let tokenizer,textModel,processor,visionModel,normalizedTextEmbeds,ready=false;
-const $=id=>document.getElementById(id);
-const status=x=>$("status").textContent=x;
-$("threshold").addEventListener("input",e=>$("thresholdValue").textContent=e.target.value);
 
-async function loadModel(){
- if(ready)return;
- status("AIモデルを起動しています…\n初回はモデルの読み込みに時間がかかります。");
- [tokenizer,textModel,processor,visionModel]=await Promise.all([
-  AutoTokenizer.from_pretrained(MODEL),
-  CLIPTextModelWithProjection.from_pretrained(MODEL,{device:"wasm"}),
-  AutoProcessor.from_pretrained(MODEL),
-  CLIPVisionModelWithProjection.from_pretrained(MODEL,{device:"wasm",quantized:false})
- ]);
- const textInputs=tokenizer(labels,{padding:true,truncation:true});
- const {text_embeds}=await textModel(textInputs);
- normalizedTextEmbeds=text_embeds.normalize().tolist();
- ready=true;$("analyze").disabled=false;
- status("AIモデルの起動に成功しました。\n写真を1枚選んで「② 写真を解析」を押してください。");
-}
+let tokenizer = null;
+let textModel = null;
+let processor = null;
+let visionModel = null;
+let normalizedTextEmbeds = null;
+let ready = false;
 
-async function analyze(){
- if(!ready)return;
- const files=Array.from($("files").files||[]);
- if(!files.length){status("写真を選択してください。");return;}
- $("results").innerHTML="";status("写真を解析しています…\n0 / "+files.length);
- for(let i=0;i<files.length;i++){
-  const file=files[i],url=URL.createObjectURL(file);
-  try{
-   const image=await RawImage.fromURL(url);
-   const imageInputs=await processor(image);
-   const {image_embeds}=await visionModel(imageInputs);
-   const normalizedImageEmbeds=image_embeds.normalize().tolist();
+const $ = id => document.getElementById(id);
+const setStatus = msg => $("status").textContent = msg;
 
-   // v8のエラー原因だった形状処理を修正。
-   // 公式MobileCLIP例と同じく、各image vectorと各text vectorをdotする。
-   const probabilities=normalizedImageEmbeds.map(x=>
-    softmax(normalizedTextEmbeds.map(y=>100*dot(x,y)))
-   );
-   const p=probabilities[0];
-   const ranked=p.map((score,idx)=>({score,label:labels[idx]})).sort((a,b)=>b.score-a.score);
-   const satinScore=Math.max(p[0],p[1])*100;
-   const threshold=Number($("threshold").value);
-   const div=document.createElement("div");div.className="item";
-   div.innerHTML=`<img src="${url}"><div class="score">${satinScore.toFixed(1)}% ${satinScore>=threshold?"候補":"除外"}</div><div class="small">${ranked.map(x=>`${(x.score*100).toFixed(1)}% ${x.label}`).join("<br>")}</div>`;
-   $("results").appendChild(div);status(`写真を解析しています…\n${i+1} / ${files.length}`);
-  }catch(e){
-   console.error(e);
-   const div=document.createElement("div");div.className="item";
-   div.innerHTML=`<div class="score">解析エラー</div><div class="small">${String(e?.message||e)}</div>`;
-   $("results").appendChild(div);
-  }finally{URL.revokeObjectURL(url);}
- }
- status(`解析完了\n${files.length}枚`);
-}
-$("start").addEventListener("click",async()=>{
- $("start").disabled=true;
- try{await loadModel();}catch(e){console.error(e);status(`MODEL ERROR: ${e?.name||"Error"}\nMESSAGE: ${e?.message||e}`);$("start").disabled=false;}
+$("threshold").addEventListener("input", e => {
+  $("thresholdValue").textContent = e.target.value;
 });
-$("analyze").addEventListener("click",analyze);
+
+async function loadModel() {
+  if (ready) return;
+
+  setStatus(
+    "AIモデルを起動しています…\n" +
+    "初回はモデルの読み込みに時間がかかります。"
+  );
+
+  // MobileCLIP-S0公式サンプルと同じ構成。
+  tokenizer = await AutoTokenizer.from_pretrained(MODEL);
+  textModel = await CLIPTextModelWithProjection.from_pretrained(
+    MODEL,
+    { device: "wasm" }
+  );
+
+  processor = await AutoProcessor.from_pretrained(MODEL);
+  visionModel = await CLIPVisionModelWithProjection.from_pretrained(
+    MODEL,
+    { device: "wasm", quantized: false }
+  );
+
+  // ★重要
+  // MobileCLIP-S0は最大77トークン入力を前提とするため、
+  // padding:trueではなく公式例と同じpadding:"max_length"を使用。
+  const textInputs = tokenizer(labels, {
+    padding: "max_length",
+    truncation: true
+  });
+
+  const { text_embeds } = await textModel(textInputs);
+  normalizedTextEmbeds = text_embeds.normalize().tolist();
+
+  ready = true;
+  $("analyze").disabled = false;
+
+  setStatus(
+    "AIモデルの起動に成功しました。\n" +
+    "写真を1枚選んで「② 写真を解析」を押してください。"
+  );
+}
+
+async function analyze() {
+  if (!ready) return;
+
+  const files = Array.from($("files").files || []);
+
+  if (!files.length) {
+    setStatus("写真を選択してください。");
+    return;
+  }
+
+  $("results").innerHTML = "";
+  setStatus(`写真を解析しています…\n0 / ${files.length}`);
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const url = URL.createObjectURL(file);
+
+    try {
+      const image = await RawImage.fromURL(url);
+      const imageInputs = await processor(image);
+
+      const { image_embeds } = await visionModel(imageInputs);
+      const normalizedImageEmbeds = image_embeds.normalize().tolist();
+
+      // MobileCLIP-S0公式サンプルと同じ類似度計算。
+      const probabilities = normalizedImageEmbeds.map(
+        x => softmax(
+          normalizedTextEmbeds.map(
+            y => 100 * dot(x, y)
+          )
+        )
+      );
+
+      const p = probabilities[0];
+
+      const ranked = p.map((score, idx) => ({
+        score,
+        label: labels[idx]
+      })).sort((a, b) => b.score - a.score);
+
+      const satinScore = Math.max(p[0], p[1]) * 100;
+      const threshold = Number($("threshold").value);
+
+      const div = document.createElement("div");
+      div.className = "item";
+
+      const img = document.createElement("img");
+      img.src = url;
+
+      const score = document.createElement("div");
+      score.className = "score";
+      score.textContent =
+        `${satinScore.toFixed(1)}% ${satinScore >= threshold ? "候補" : "除外"}`;
+
+      const detail = document.createElement("div");
+      detail.className = "small";
+      detail.innerHTML = ranked.map(
+        x => `${(x.score * 100).toFixed(1)}% ${x.label}`
+      ).join("<br>");
+
+      div.append(img, score, detail);
+      $("results").appendChild(div);
+
+      setStatus(`写真を解析しています…\n${i + 1} / ${files.length}`);
+
+      // SafariのUI更新を少し許可
+      await new Promise(r => setTimeout(r, 0));
+
+    } catch (e) {
+      console.error(e);
+
+      const div = document.createElement("div");
+      div.className = "item";
+
+      const score = document.createElement("div");
+      score.className = "score";
+      score.textContent = "解析エラー";
+
+      const detail = document.createElement("div");
+      detail.className = "small";
+      detail.textContent = `${e?.name || "Error"}: ${e?.message || e}`;
+
+      div.append(score, detail);
+      $("results").appendChild(div);
+
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  setStatus(`解析完了\n${files.length}枚`);
+}
+
+$("start").addEventListener("click", async () => {
+  $("start").disabled = true;
+
+  try {
+    await loadModel();
+  } catch (e) {
+    console.error(e);
+
+    setStatus(
+      `MODEL ERROR: ${e?.name || "Error"}\n` +
+      `MESSAGE: ${e?.message || e}`
+    );
+
+    $("start").disabled = false;
+  }
+});
+
+$("analyze").addEventListener("click", analyze);
 </script>
 </main>
 </body>
